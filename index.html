@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>实验进度管理系统</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='15' fill='%231e40af'/><text x='50' y='65' font-size='50' text-anchor='middle' fill='white' font-family='Arial'>E</text></svg>">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #1e40af;
+      --primary-hover: #1e3a8a;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --status-running: #22c55e;
+      --status-idle: #94a3b8;
+      --status-completed: #f59e0b;
+      --status-alert: #ef4444;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+    
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar { width: 240px; background: var(--card); border-right: 1px solid var(--border); padding: 20px 0; }
+    .sidebar h1 { font-size: 18px; font-weight: 700; color: var(--primary); padding: 0 20px 20px; border-bottom: 1px solid var(--border); }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 12px 20px; cursor: pointer; color: var(--text-muted); font-size: 14px; transition: all 0.2s; }
+    .nav-item:hover { background: #f1f5f9; color: var(--text); }
+    .nav-item.active { background: var(--primary); color: white; }
+    .main { flex: 1; padding: 24px; overflow-y: auto; }
+    
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .header h2 { font-size: 24px; font-weight: 700; }
+    .header p { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+    .btn { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline { background: white; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { background: #f1f5f9; }
+    .btn-danger { background: var(--status-alert); color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--card); border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
+    .stat-card .label { font-size: 12px; color: var(--text-muted); }
+    .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    
+    .machine-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .machine-card { background: var(--card); border-radius: 12px; padding: 16px; border: 1px solid var(--border); border-left: 4px solid var(--status-idle); transition: all 0.3s; }
+    .machine-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .machine-card.running { border-left-color: var(--status-running); }
+    .machine-card.completed { border-left-color: var(--status-completed); animation: pulse 2s infinite; }
+    .machine-card.alert { border-left-color: var(--status-alert); animation: pulse 1s infinite; }
+    
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .card-header h3 { font-size: 16px; font-weight: 600; }
+    .card-header .code { font-size: 12px; color: var(--text-muted); }
+    .card-header .type { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .status-badge.running { background: #dcfce7; color: #16a34a; }
+    .status-badge.idle { background: #f1f5f9; color: #64748b; }
+    .status-badge.completed { background: #fef3c7; color: #d97706; }
+    .status-badge.alert { background: #fee2e2; color: #dc2626; }
+    
+    .card-body { border-top: 1px solid var(--border); padding-top: 12px; }
+    .card-body .row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+    .card-body .label { color: var(--text-muted); }
+    .countdown { font-family: monospace; font-size: 20px; font-weight: 700; text-align: center; margin: 8px 0; }
+    .countdown.warning { color: var(--status-completed); }
+    .countdown.danger { color: var(--status-alert); }
+    
+    .card-actions { margin-top: 12px; }
+    .card-actions .btn { width: 100%; justify-content: center; }
+    
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal.hidden { display: none; }
+    .modal-content { background: var(--card); border-radius: 16px; padding: 24px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .modal-header h3 { font-size: 18px; font-weight: 600; }
+    .modal-close { background: none; border: none; cursor: pointer; padding: 4px; }
+    
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    .form-group input, .form-group select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(30,64,175,0.1); }
+    .form-actions { display: flex; gap: 12px; margin-top: 20px; }
+    .form-actions .btn { flex: 1; justify-content: center; }
+    
+    .zone-settings { background: #f8fafc; border-radius: 8px; padding: 12px; margin-top: 8px; }
+    .zone-row { display: grid; grid-template-columns: 40px 1fr 1fr; gap: 8px; align-items: end; margin-bottom: 8px; }
+    .zone-row label { font-size: 11px; color: var(--text-muted); }
+    
+    .table-container { background: var(--card); border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 16px; text-align: left; font-size: 13px; }
+    th { background: #f8fafc; font-weight: 600; border-bottom: 1px solid var(--border); }
+    td { border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+    .empty-state { text-align: center; padding: 48px 24px; color: var(--text-muted); }
+    
+    .page { display: none; }
+    .page.active { display: block; }
+    
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 200; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>实验进度管理</h1>
+      <nav>
+        <div class="nav-item active" data-page="dashboard">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          机台看板
+        </div>
+        <div class="nav-item" data-page="machines">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          机台管理
+        </div>
+      </nav>
+    </aside>
+    
+    <main class="main">
+      <!-- 机台看板页面 -->
+      <div id="dashboard-page" class="page active">
+        <div class="header">
+          <div>
+            <h2>机台看板</h2>
+            <p>实时监控所有机台运行状态</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="showAddMachineModal()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              新增机台
+            </button>
+            <button class="btn btn-outline" onclick="loadMachines()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+              刷新
+            </button>
+          </div>
+        </div>
+        
+        <div class="stats">
+          <div class="stat-card"><div class="label">机台总数</div><div class="value" id="stat-total">0</div></div>
+          <div class="stat-card"><div class="label">运行中</div><div class="value" id="stat-running" style="color:var(--status-running)">0</div></div>
+          <div class="stat-card"><div class="label">空闲</div><div class="value" id="stat-idle" style="color:var(--status-idle)">0</div></div>
+          <div class="stat-card"><div class="label">已完成</div><div class="value" id="stat-completed" style="color:var(--status-completed)">0</div></div>
+        </div>
+        
+        <div id="machine-grid" class="machine-grid"></div>
+      </div>
+      
+      <!-- 机台管理页面 -->
+      <div id="machines-page" class="page">
+        <div class="header">
+          <div>
+            <h2>机台管理</h2>
+            <p>管理所有试验机台信息</p>
+          </div>
+          <button class="btn btn-primary" onclick="showAddMachineModal()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            新增机台
+          </button>
+        </div>
+        
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>机台名称</th><th>编号</th><th>位置</th><th>类型</th><th style="text-align:right">操作</th></tr>
+            </thead>
+            <tbody id="machine-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <!-- 新增机台弹窗 -->
+  <div id="add-machine-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>新增机台</h3>
+        <button class="modal-close" onclick="hideModal('add-machine-modal')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form onsubmit="addMachine(event)">
+        <div class="form-group">
+          <label>机台名称</label>
+          <input type="text" id="add-name" required placeholder="例如：1号恒温恒湿箱">
+        </div>
+        <div class="form-group">
+          <label>机台编号</label>
+          <input type="text" id="add-code" required placeholder="例如：TH-001">
+        </div>
+        <div class="form-group">
+          <label>位置</label>
+          <input type="text" id="add-location" placeholder="例如：A区-01">
+        </div>
+        <div class="form-group">
+          <label>机台类型</label>
+          <select id="add-type">
+            <option value="three_zone">三箱式恒温恒湿箱</option>
+            <option value="constant">恒温恒湿箱</option>
+            <option value="thermal_shock">冷热冲击箱</option>
+            <option value="rapid_temp">快速温变箱</option>
+            <option value="xenon">氙灯老化试验箱</option>
+            <option value="qsun">Q-SUN氙灯实验箱</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" onclick="hideModal('add-machine-modal')">取消</button>
+          <button type="submit" class="btn btn-primary">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- 启动试验弹窗 -->
+  <div id="start-exp-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>启动试验 - <span id="exp-machine-name"></span></h3>
+        <button class="modal-close" onclick="hideModal('start-exp-modal')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form onsubmit="startExperiment(event)">
+        <input type="hidden" id="exp-machine-id">
+        <input type="hidden" id="exp-machine-type">
+        <div class="form-group">
+          <label>机种信息</label>
+          <input type="text" id="exp-product" required placeholder="请输入机种名称或型号">
+        </div>
+        <div class="form-group">
+          <label>测试时长（分钟）</label>
+          <input type="number" id="exp-duration" required min="1" placeholder="例如：60">
+        </div>
+        <div class="form-group">
+          <label>温湿度设置</label>
+          <div id="temp-humidity-settings">
+            <div style="display:flex;gap:12px;">
+              <div style="flex:1">
+                <label style="font-size:11px;color:var(--text-muted)">温度 (°C)</label>
+                <input type="number" id="exp-temp" value="25">
+              </div>
+              <div style="flex:1">
+                <label style="font-size:11px;color:var(--text-muted)">湿度 (%RH)</label>
+                <input type="number" id="exp-humidity" value="50">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" onclick="hideModal('start-exp-modal')">取消</button>
+          <button type="submit" class="btn btn-primary">启动试验</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- 提示消息 -->
+  <div id="toast" class="toast"></div>
+  
+  <script src="app.js"></script>
+</body>
+</html>
